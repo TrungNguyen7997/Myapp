@@ -327,6 +327,9 @@ export default class BluetoothScreen extends Component {
                     this._renderRow(this.state.pairedDs)
                 }
                 </View>
+                <Button color='#0394fc' onPress = {() =>{navigate('DebugScreen');
+                }}
+                title = "Gửi dữ liệu">
             </ScrollView>
         );
     }
