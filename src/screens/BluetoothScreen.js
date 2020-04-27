@@ -251,6 +251,7 @@ export default class BluetoothScreen extends Component {
     }
 
     render() {
+        const {navigate} = this.props.navigation;
         return (
             <ScrollView style={styles.container}>
                 <Text>{this.state.debugMsg}</Text>
