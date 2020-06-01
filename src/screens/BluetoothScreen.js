@@ -16,6 +16,8 @@ import {ActivityIndicator,
     TouchableOpacity,
     Dimensions,
     ToastAndroid} from 'react-native';
+import DebugScreen from './DebugScreen';
+
 
 var {height, width} = Dimensions.get('window');
 export default class BluetoothScreen extends Component {
@@ -328,9 +330,13 @@ export default class BluetoothScreen extends Component {
                     this._renderRow(this.state.pairedDs)
                 }
                 </View>
-                <Button color='#0394fc' onPress = {() =>{navigate('DebugScreen');
+                
+                <Button color='#0394fc' onPress = {() =>{navigate(DebugScreen);
                 }}
                 title = "Gửi dữ liệu">
+                    
+                </Button>
+                
             </ScrollView>
         );
     }
@@ -343,7 +349,7 @@ const styles = StyleSheet.create({
     },
 
     title:{
-        width:width,
+        width: width,
         backgroundColor:"#eee",
         color:"#232323",
         textAlign:"left"
