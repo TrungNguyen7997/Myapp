@@ -24,6 +24,7 @@ export default class DebugScreen extends Component{
             }
         }, true);
     }
+    
     monitorDevice = () => {
         this.setState({monitoring: true})
         console.log(this.state.servicesDiscovered)
@@ -85,7 +86,21 @@ export default class DebugScreen extends Component{
             }
         });
     }
-
+    write(peripheralId, serviceUUID, characteristicUUID, data, maxByteSize) {
+        if (maxByteSize == null) {
+          maxByteSize = 20;
+        }
+        return new Promise((fulfill, reject) => {
+          bleManager.write(peripheralId, serviceUUID, characteristicUUID, data, maxByteSize, (error) => {
+            if (error) {
+              reject(error);
+            } else {
+              fulfill();
+            }
+          });
+        });
+      }
+      
     send() {
         this.manager.writeCharacteristicWithResponseForDevice("74:DF:BF:23:AF:92",
             this.device.serviceUUIDs[0],
