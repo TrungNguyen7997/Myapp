@@ -1,22 +1,14 @@
-import React, {Component} from 'react';
-import {BluetoothEscposPrinter, BluetoothManager} from "react-native-bluetooth-escpos-printer";
-
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import Icon2 from 'react-native-vector-icons/FontAwesome';
+import React, { Component } from 'react';
+import { ActivityIndicator, DeviceEventEmitter, Dimensions, NativeEventEmitter, 
+    Platform, ScrollView, Switch, Text, ToastAndroid, TouchableOpacity, View, 
+    StyleSheet 
+} from 'react-native';
+import { BluetoothManager } from "react-native-bluetooth-escpos-printer";
+import BleManager from 'react-native-ble-manager';
 import { Button } from 'react-native-elements';
-import {ActivityIndicator,
-    Platform,
-    StyleSheet,
-    Text,
-    View,
-    ScrollView,
-    DeviceEventEmitter,
-    NativeEventEmitter,
-    Switch,
-    TouchableOpacity,
-    Dimensions,
-    ToastAndroid} from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
+let deviceConnected = null;
 var {height, width} = Dimensions.get('window');
 export default class BluetoothScreen extends Component {
     _listeners = [];
@@ -24,7 +16,7 @@ export default class BluetoothScreen extends Component {
     constructor(props) {
         super(props);
         this.state = {
-            devices: null,
+            deviceConnected: null,
             pairedDs:[],
             foundDs: [],
             bleOpend: false,
@@ -88,6 +80,7 @@ export default class BluetoothScreen extends Component {
             //         loading:false,
             //     })
             // });
+
         }, (err)=> {
             err
             this.setState({
@@ -140,6 +133,7 @@ export default class BluetoothScreen extends Component {
     componentDidMount() {
         this._initBluetooth();
         this._initSetting();
+        this._scan();
     }
 
     _deviceAlreadPaired(rsp) {
@@ -189,32 +183,42 @@ export default class BluetoothScreen extends Component {
         }
     }
 
+    _connect(device) {
+        this.setState({
+            loading:true
+        });
+        BluetoothManager.connect(device.address)
+        .then((s)=>{
+            this.setState({
+                loading:false,
+                boundAddress:device.address,
+                name:s || "Không xác định"
+            });
+            deviceConnected = Object.assign({}, device);
+        },(e)=>{
+            this.setState({
+                loading:false
+            });
+            alert("Có lỗi khi kết nối tới thiết bị. Vui lòng thử lại");
+        })
+    }
+
     _renderRow(rows){
         let items = [];
         for(let i in rows){
             let row = rows[i];
             if(row.address) {
                 items.push(
-                    <TouchableOpacity key={new Date().getTime()+i} style={styles.wtf} onPress={()=>{
-                    this.setState({
-                        loading:true
-                    });
-                    BluetoothManager.connect(row.address)
-                    .then((s)=>{
-                        this.setState({
-                            loading:false,
-                            boundAddress:row.address,
-                            name:s || "Không xác định"
-                        })
-                    },(e)=>{
-                        this.setState({
-                            loading:false
-                        });
-                        alert("Có lỗi khi kết nối tới thiết bị. Vui lòng thử lại");
-                    })
-
-                }}><Text style={styles.name}>{row.name || "Không xác định"}</Text><Text
-                        style={styles.address}>{row.address}</Text></TouchableOpacity>
+                    <TouchableOpacity 
+                        key={new Date().getTime()+i} 
+                        style={styles.wtf} 
+                        onPress={()=>{
+                            this._connect(row);
+                        }}
+                    >
+                        <Text style={styles.name}>{row.name || "Không xác định"}</Text>
+                        <Text style={styles.address}>{row.address}</Text>
+                    </TouchableOpacity>
                 );
             }
         }
@@ -260,55 +264,60 @@ export default class BluetoothScreen extends Component {
                     <Text style={styles.title}>Trạng thái Bluetooth: {this.state.bleOpend ? <Text style={{color: 'green'}}> BẬT</Text> : <Text  style={{color: 'red'}}> TẮT</Text>}   </Text>
                 </View>
                 <View>
-                <Switch value={this.state.bleOpend} onValueChange={(v)=>{
-                this.setState({
-                    loading:true
-                })
-                if(!v){
-                    BluetoothManager.disableBluetooth().then(()=>{
+                    <Switch value={this.state.bleOpend} onValueChange={(v)=>{
                         this.setState({
-                            bleOpend:false,
-                            loading:false,
-                            foundDs:[],
-                            pairedDs:[]
-                        });
-                    },(err)=>{alert(err)});
-                }else{
-                    BluetoothManager.enableBluetooth().then((r)=>{
-                        var paired = [];
-                        if(r && r.length>0){
-                            for(var i=0;i<r.length;i++){
-                                try{
-                                    paired.push(JSON.parse(r[i]));
-                                }catch(e){
-                                    //ignore
+                            loading:true
+                        })
+                        if(!v){
+                            BluetoothManager.disableBluetooth().then(()=>{
+                                this.setState({
+                                    bleOpend:false,
+                                    loading:false,
+                                    foundDs:[],
+                                    pairedDs:[]
+                                });
+                            },(err)=>{alert(err)});
+                        }else{
+                            BluetoothManager.enableBluetooth().then((r)=>{
+                                var paired = [];
+                                if(r && r.length>0){
+                                    for(var i=0;i<r.length;i++){
+                                        try{
+                                            paired.push(JSON.parse(r[i]));
+                                        }catch(e){
+                                            //ignore
+                                        }
+                                    }
                                 }
-                            }
+                                this.setState({
+                                    bleOpend:true,
+                                    loading:false,
+                                    pairedDs:paired
+                                })
+                            },(err)=>{
+                                this.setState({
+                                    loading:false
+                                })
+                                alert(err)
+                            });
                         }
-                        this.setState({
-                            bleOpend:true,
-                            loading:false,
-                            pairedDs:paired
-                        })
-                    },(err)=>{
-                        this.setState({
-                            loading:false
-                        })
-                        alert(err)
-                    });
-                }
-            }}/>
-                    <Button color="#0394fc" disabled={this.state.loading || !this.state.bleOpend} onPress={()=>{
-                        this.setState({
-                            pairedDs: []
-                        });
-                        this._scan();
-                    }} title={this.state.loading ? 'Đang quét ...': 'Quét'}/>
+                    }}/>
+                    <Button 
+                        color="#0394fc" 
+                        disabled={this.state.loading || !this.state.bleOpend} 
+                        onPress={()=>{
+                            this.setState({
+                                pairedDs: []
+                            });
+                            this._scan();
+                        }} 
+                        title={this.state.loading ? 'Đang quét ...': 'Quét'}
+                    />
                     {this.state.loading ? (<ActivityIndicator animating={true}/>) : null}
-                </View>
+                </View>        
                 <View style={{ flexDirection: 'row' }}>
                     <Icon name='bluetooth-connect' size={15} color='blue' style={styles.icon}/>
-                    <Text style={styles.title}>Thiết bị đang kết nối: <Text style={{color:"blue"}}>{!this.state.name ? 'Không có' : this.state.name}</Text></Text>
+                    <Text style={styles.title}>Thiết bị đang kết nối: <Text style={{color:"blue"}}>{!this.state.name ? 'Chưa kết nối' : this.state.name}</Text></Text>
                 </View>
                 <View style={{ flexDirection: 'row' }}>
                     <Icon name='google-nearby' size={15} color='blue' style={styles.icon}/>
@@ -328,11 +337,22 @@ export default class BluetoothScreen extends Component {
                     this._renderRow(this.state.pairedDs)
                 }
                 </View>
-                <Button color='#0394fc' onPress = {() =>{navigate('DebugScreen');
-                }}
-                title = "Gửi dữ liệu">
+                <Button 
+                    color='#0394fc' 
+                    onPress = {() =>{
+                        // navigate('DebugScreen');
+                    }}
+                title = "Gửi dữ liệu"/>
             </ScrollView>
         );
+    }
+
+    _wirte() {
+
+    }
+
+    _read() {
+        
     }
 }
 
@@ -386,6 +406,6 @@ const styles = StyleSheet.create({
 
 BluetoothScreen.navigationOptions = ({ navigation }) => {
     return {
-        title: "In hóa đơn",
+        title: "Danh sách thiết bị",
     }
 }
