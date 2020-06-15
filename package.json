@@ -10,7 +10,11 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@react-native-community/async-storage": "^1.11.0",
     "@react-native-community/masked-view": "^0.1.9",
+    "aes-js": "^3.1.2",
+    "axios": "^0.19.2",
+    "md5": "^2.2.1",
     "react": "16.11.0",
     "react-native": "0.62.0",
     "react-native-ble-manager": "^7.2.0",

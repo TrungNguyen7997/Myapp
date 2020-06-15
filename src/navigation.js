@@ -1,15 +1,23 @@
 import { createAppContainer } from 'react-navigation'
 import { createStackNavigator } from 'react-navigation-stack'
+import LoginScreen from './screens/LoginScreen'
 import BluetoothScreen from './screens/BluetoothScreen'
+// import DebugScreen from './screens/DebugScreen'
 
 const StackNavigator = createStackNavigator(
   {
+    Login: {
+      screen: LoginScreen
+    },
     Bluetooth: {
-        screen: BluetoothScreen
-    }
+      screen: BluetoothScreen
+    },
+    // Debug: {
+    //   screen: DebugScreen
+    // }
   },
   {
-    initialRouteName: 'Bluetooth',
+    initialRouteName: 'Login',
     headerMode: 'none',
     mode: 'modal'
   }
