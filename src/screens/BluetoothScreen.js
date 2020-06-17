@@ -4,20 +4,26 @@ import { ActivityIndicator, DeviceEventEmitter, Dimensions, NativeEventEmitter,
     StyleSheet, Alert 
 } from 'react-native';
 import { BluetoothManager } from "react-native-bluetooth-escpos-printer";
+import AsyncStorage from '@react-native-community/async-storage';
 import baseAPI from '../api/baseAPI';
 import FunctionStorage from '../FunctionStorage'
 import { Button } from 'react-native-elements';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Icon2 from 'react-native-vector-icons/FontAwesome5';
 import Icon3 from 'react-native-vector-icons/MaterialIcons';
+import Icon4 from 'react-native-vector-icons/FontAwesome';
+import BluetoothSerial from 'react-native-bluetooth-serial'
+import { abs } from 'react-native-reanimated';
 
-let firmware = '';
+let stringReader = '';
 _scrollToBottomY = {};
-let cmdlist = [];
 _listeners = [];
-
+senderTimeout = {};
+missNumber = 0;
+let userdata = {};
 const AES = 'AfHgtzE80a7ZC5G2elGtVUM35WoT6URv'
 var {height, width} = Dimensions.get('window');
+let readInterval = null;
 
 const _deviceAlreadPaired = (rsp) => {
     // console.log('_deviceAlreadPaired');
@@ -120,7 +126,7 @@ const _initBluetooth = () => {
 }
 
 const _initSetting = () => {
-    console.log('_initSetting');
+    // console.log('_initSetting');
     if (Platform.OS === 'ios') {
         let bluetoothManagerEmitter = new NativeEventEmitter(BluetoothManager);
         _listeners.push(bluetoothManagerEmitter.addListener(BluetoothManager.EVENT_DEVICE_ALREADY_PAIRED,
@@ -131,8 +137,7 @@ const _initSetting = () => {
             _deviceFoundEvent(rsp)
         }));
         _listeners.push(bluetoothManagerEmitter.addListener(BluetoothManager.EVENT_CONNECTION_LOST, ()=> {
-            setName('');
-            setBoundAddress('');
+            // setBoundDevice(null);
         }));
     } else if (Platform.OS === 'android') {
         _listeners.push(DeviceEventEmitter.addListener(
@@ -145,8 +150,7 @@ const _initSetting = () => {
             }));
         _listeners.push(DeviceEventEmitter.addListener(
             BluetoothManager.EVENT_CONNECTION_LOST, ()=> {
-                setName('');
-                setBoundAddress('');
+                // setBoundDevice(null);
             }
         ));
         _listeners.push(DeviceEventEmitter.addListener(
@@ -157,17 +161,28 @@ const _initSetting = () => {
     }
 }
 
+const _disconnect = () => {
+    BluetoothSerial.disconnect().then(()=> {
+        console.log("Disconnected from " + boundDevice.address);
+        clearInterval(readInterval);
+        setConnected(false);
+    });
+}
+
 const _connect = (device) => {
+    _updateListCommand("Connecting to " + device.name + ' ...', true, 'blue');
     setLoading2(true);
-    BluetoothManager.connect(device.address)
+    BluetoothSerial.connect(device.address)
     .then((s)=>{
         setLoading2(false);
-        setBoundAddress(device.address);
-        setName(s || 'Không xác định');
+        setBoundDevice(device);
         setShowNearDevices(false);
+        _updateListCommand(s.message, false, 'green');
+        setConnected(true);
+        _read();
     },(e)=>{
         setLoading2(false);
-        alert("Có lỗi khi kết nối tới thiết bị. Vui lòng thử lại");
+        _updateListCommand("Có lỗi khi kết nối tới thiết bị. Vui lòng thử lại", false, 'red');
     })
 }
 
@@ -203,10 +218,14 @@ const _renderCommands = (rows) => {
                     <TouchableOpacity
                         disabled={loading3}
                         onPress={() => {
-                            _sendCommand(row);
+                            if(row.name == 'FW') _getFirmWareAndListCommand();
+                            else _sendCommand(row);
+                        }}
+                        onLongPress={() => {
+                            _gotoSettingCmd(row, 'update');
                         }}
                     >
-                        <Text style={{color: 'blue'}}>{row}</Text>
+                        <Text style={{color: 'blue'}}>{row.name}</Text>
                     </TouchableOpacity>
                 </View>
             );
@@ -219,11 +238,11 @@ const _renderTerminalCmd = (cmds) => {
     let items = [];
     for(let i in cmds){
         let cmd = cmds[i];
-        if(cmd && cmd.includes('Failed')) {
-            let arr = cmd.split('|');
+        if(cmd.text && cmd.text.includes('Failed')) {
+            let arr = cmd.text.split('|');
             items.push(
                 <View key={new Date().getTime()+i} style={{flexDirection: 'row'}}>
-                    <Text style={{marginRight: 5}}>{'> ' + cmd}</Text>
+                    <Text style={{marginRight: 5, color: cmd.color}}>{cmd.text}</Text>
                     <TouchableOpacity
                         disabled={loading3}
                         onPress={() => {
@@ -236,62 +255,47 @@ const _renderTerminalCmd = (cmds) => {
             );
         } else {
             items.push(
-                <Text key={new Date().getTime()+i}>{'> ' + cmd}</Text>
+                <Text key={new Date().getTime()+i} style={{color: cmd.color}}>{cmd.text}</Text>
             );
         }
     }
     return items;
 }
 
-const _updateListCommand = (cmdStr, isLoading) => {
-    cmdlist.push(cmdStr);
-    setLoading3(isLoading);
-    setCmds(Object.assign([], cmdlist));
-}
-
-const _getFirmWareAndListCommand = (navigation) => {
-    _updateListCommand('Downloading firmware and list of commands ...', true);
-
+const _getFirmWareAndListCommand = () => {
+    _updateListCommand('Downloading firmware and list of commands ...', true, 'blue');
     let request = {
         tokenKey: 'aquasoft@Aaqq1122'  // Master token
     };
 
     baseAPI.post(
-        navigation.getParam('userdata').domain + '/getFirmWareAndListCommand', JSON.stringify(request))
+        userdata.domain + '/getFirmWareAndListCommand', JSON.stringify(request))
     .then((response) => {
         if(response.status === 200) {
             if(response.data.message === "true") {
-                fw = FunctionStorage.AESDecrypt(response.data.firmware, AES);
+                let fw = FunctionStorage.AESDecrypt(response.data.firmware, AES);
                 // Resolve lib aes-js bug
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
-                fw = fw.replace('\0','');
+                for(let i = 0; i < 10 ; i ++) fw = fw.replace('\0','');
                 setFirmware(Object.assign('', fw));
-                setListcommand(response.data.listcommand || []);
-                _updateListCommand('Download successfull.', false);
+                _updateListCommand('Download successfull.', false, 'green');
+                _updateListCommand('Updating firmware ...', true, 'blue');
+                setTimeout(() => {
+                    _updateListCommand('Update firmware successfull.', false, 'green');
+                }, 2000);
             } else {
-                _updateListCommand('Failed get |firmware|. ErrorReasion: ' + response.data.message, false);
+                _updateListCommand('Failed get |firmware|. ErrorReasion: ' + response.data.message, false, 'red');
             }
         } else {
-            _updateListCommand("Failed get |firmware|. StatusCode: " + response.status, false);
+            _updateListCommand("Failed get |firmware|. StatusCode: " + response.status, false, 'red');
         }
     })
     .catch((error) => {
-        _updateListCommand("Failed get |firmware|. Code: " + error.toString(), false);
+        _updateListCommand("Failed get |firmware|. Code: " + error.toString(), false, 'red');
     });
 }
 
 const _scan = () => {
-    console.log('_scan');
+    // console.log('_scan');
     setLoading(true);
     setShowNearDevices(true);
     setFoundDs([]);
@@ -321,10 +325,10 @@ const BluetoothScreen = ({navigation}) => {
     const scrollRef = useRef(null);
 
     // State define
+    [connected, setConnected] = useState(false);
     [pairedDs, setPairedDs] = useState([]);
     [foundDs, setFoundDs] = useState([]);
-    [boundAddress, setBoundAddress] = useState('');
-    [name, setName] = useState('');
+    [boundDevice, setBoundDevice] = useState(null);
     [bleOpend, setBleOpend] = useState(false);
     [loading, setLoading] = useState(false);                    // Loading _scan Device
     [loading2, setLoading2] = useState(false);                  // Loading _download Firmware
@@ -345,41 +349,125 @@ const BluetoothScreen = ({navigation}) => {
         { cancelable: false }
     );
 
-    _wirte = () => {
+    _updateListCommand = (cmdStr, isLoading, color) => {
+        let cmdlist = Object.assign([], cmds);
+        cmdlist.push({
+            text: cmdStr,
+            color: color
+        });
+        setLoading3(isLoading);
+        setCmds(Object.assign([], cmdlist));
+        setTimeout(() => {
+            scrollRef.current.scrollToEnd({animated: false});
+        }, 50);
+    }
 
+    /**
+     * Write message to device
+     * @param  {String} message
+     */
+    _write = (message) => {
+        _updateListCommand(message, true, 'blue');
+        
+        BluetoothSerial.write(message).then((res) => {
+            senderTimeout = setTimeout(() => {
+                _updateListCommand('Failed to send command or no response', false, 'red');
+            }, 10000);
+        }).catch((err) => {
+            // console.log(err.toString());
+            _updateListCommand('Failed send command', false, 'red');
+        });
     }
 
     _read = () => {
-        
+        clearInterval(readInterval);
+        console.log('On listen {read}');
+        stringReader = '';
+        readInterval = setInterval(() => {
+            BluetoothSerial.readUntilDelimiter('\r\n').then((data) => {
+                if(data && data != null && data != '') {
+                    clearTimeout(senderTimeout);
+                    var currentdate = new Date();
+                    var datetime = currentdate.getHours() + ":" + currentdate.getMinutes() + ":" + currentdate.getSeconds() + "." + currentdate.getMilliseconds();
+                    // console.log('[' + datetime + '] Received: ' + data);
+                    stringReader += data;
+                } else {
+                    missNumber ++;
+                    if(missNumber > 5 && stringReader != '') {
+                        missNumber = 0;
+                        _updateListCommand(stringReader, false, 'green');
+                        // console.log('stringReader: ' + stringReader);
+                        stringReader = '';
+                    }
+                }
+            })
+        }, 50);
     }
 
     _sendCommand = (cmd) => {
-        if(name) {
-            _updateListCommand('Sending command ' + cmd + ' ...', true);
-            setTimeout(() => {
-                _updateListCommand('Failed send command |' + cmd + '|.', false);
-                scrollRef.current.scrollToEnd({animated: true})
-            }, 1000);
-        }
+        if(connected) _write('>' + cmd.name + ':' + cmd.value + ';\r\n');
         else createButtonAlert('No connecting device found. Please connect one and try again.');
+    }
+
+    _gotoSettingCmd = (cmd, update) => {
+        navigation.navigate('SettingCommands', {target_cmd: cmd, userdata: userdata, mode: update});
     }
 
     // Effects
     useEffect(() => {
-        _initBluetooth();
-        _initSetting();
-        _getFirmWareAndListCommand(navigation);
+        // console.log('BluetoothScreen Effect 1');
+        userdata = navigation.getParam('userdata');
+        try {
+            AsyncStorage.getItem('cmdlist').then((value) => {
+                let cmdjson = value.toString() == 'NaN' ? '[]' : value;
+                if(cmdjson == null) cmdjson == '[]';
+                let _listcmd = JSON.parse(cmdjson);
+                setListcommand(_listcmd);
+            });
+        } catch (error) {
+            console.log(error);
+            setListcommand([]);
+        }
     }, [navigation]);
 
     useEffect(() => {
-        _scan();
+        // console.log('BluetoothScreen Effect 2');
+        BluetoothSerial.isConnected().then((status) => {
+            setCmds([]);
+            setConnected(status);
+            console.log('Bluetooth State: ' + status);
+            if(!status) _scan();
+            else _read();
+        });
     }, []);
+
+    useEffect(() => {
+        // console.log('BluetoothScreen Effect 3');
+        _initBluetooth();
+        _initSetting();
+    }, [])
 
     return (
         <ScrollView style={styles.container}>
-            <View style={{ flexDirection: 'row', marginBottom: 15, marginTop: 15 }}>
-                <Icon name='bluetooth' size={15} color='blue' style={styles.icon}/>
-                <Text style={styles.title}>Bluetooth state: {bleOpend ? <Text style={{color: 'green'}}> ON</Text> : <Text  style={{color: 'red'}}> OFF</Text>}   </Text>
+            <View style={{ flexDirection: 'row', marginBottom: 5, marginTop: 5 }}>
+                <Icon name='bluetooth-connect' size={15} color='blue' style={styles.icon}/>
+                <View style={{flexDirection: 'row'}}>
+                    <Text style={styles.title}>Status: 
+                        <Text
+                            disabled={loading || loading3} 
+                            onPress={() => {
+                                if((connected && connected === true)) _disconnect();
+                                else {
+                                    if(boundDevice != null) _connect(boundDevice);
+                                }
+                            }}
+                            style={{color: (connected && connected === true) ? "green": 'red'}}
+                        >
+                            {(connected && connected === true) ? "  Đã kết nối ": "  Ngắt kết nối "}
+                            {(boundDevice !== null) ? ('(' + (boundDevice.name || 'Chưa xác đinh') + ')') : "(-)"}
+                        </Text>
+                    </Text>
+                </View>
                 <Switch style={{position: 'absolute', top: -5, right: 0}} value={bleOpend} onValueChange={(v)=>{
                     setLoading(true);
                     if(!v){
@@ -388,6 +476,7 @@ const BluetoothScreen = ({navigation}) => {
                             setLoading(false);
                             setFoundDs([]);
                             setPairedDs([]);
+                            setConnected(false);
                         },(err)=>{alert(err)});
                     }else{
                         BluetoothManager.enableBluetooth().then((r)=>{
@@ -404,55 +493,53 @@ const BluetoothScreen = ({navigation}) => {
                             setBleOpend(true);
                             setLoading(false);
                             setPairedDs(paired);
+                            _scan();
                         },(err)=>{
                             setLoading(false);
                             alert(err)
                         });
                     }
                 }}/>
-            </View>
-            <View>
-                <Button 
-                    color="#0394fc" 
-                    disabled={loading || !bleOpend} 
+                {loading ? (<ActivityIndicator style={{position: 'absolute', top: 0, right: 57}} animating={true}/>) 
+                : 
+                <TouchableOpacity style={{position: 'absolute', top: 0, right: 50}}
                     onPress={()=>{
                         setPairedDs([]);
                         _scan();
                     }} 
-                    title={loading ? 'Scanning ...': 'Scan'}
-                />
-                {loading ? (<ActivityIndicator animating={true}/>) : null}
-            </View>        
-            <View style={{ flexDirection: 'row' }}>
-                <Icon name='bluetooth-connect' size={15} color='blue' style={styles.icon}/>
-                <Text style={styles.title}>Connecting device: <Text style={{color:"blue"}}>{!name ? 'Chưa kết nối' : name}</Text></Text>
-            </View>
+                    disabled={loading || !bleOpend}
+                >
+                    <Text style={{color: 'blue'}}>{'SCAN'}</Text>
+                </TouchableOpacity>
+                }
+            </View>  
+                     
             {showNearDevices ? <>
                 <View style={{ flexDirection: 'row' }}>
                     <Icon name='google-nearby' size={15} color='blue' style={styles.icon}/>
                     <Text style={styles.title}>Found devices:</Text>
                 </View>
-                {loading2 ? (<ActivityIndicator animating={true}/>) : null}
-                <View style={{flex:1,flexDirection:"column"}}>
+                <View style={{flexDirection:"column"}}>
                 {
                     _renderRow(foundDs)
                 }
                 </View>
+                <View style={{ flexDirection: 'row' }}>
+                    <Icon name='lan-connect' size={15} color='blue' style={styles.icon}/>
+                    <Text style={styles.title}>Paired devices:</Text>
+                </View>
+                <View style={{flexDirection:"column"}}>
+                {
+                    _renderRow(pairedDs)
+                }
+                </View>
             </> : null}
-            <View style={{ flexDirection: 'row' }}>
-                <Icon name='lan-connect' size={15} color='blue' style={styles.icon}/>
-                <Text style={styles.title}>Paired devices:</Text>
-            </View>
-            <View style={{flex:1,flexDirection:"column"}}>
-            {
-                _renderRow(pairedDs)
-            }
-            </View>
+         
             <View style={{ flexDirection: 'row' }}>
                 <Icon2 name='terminal' size={15} color='blue' style={styles.icon}/>
                 <Text style={styles.title}>Terminal:</Text>
             </View>
-            <View>
+            <View style={{flex: 1}}>
                 <ScrollView 
                     onContentSizeChange={(contentWidth, contentHeight)=>{
                         _scrollToBottomY = contentHeight;
@@ -465,31 +552,35 @@ const BluetoothScreen = ({navigation}) => {
                     </View>
                 </ScrollView>
                 {loading3 ? (<ActivityIndicator style={{position: 'absolute', top: 50, right: 23}} animating={true}/>) : null}
-                <TouchableOpacity style={{position: 'absolute', top: 20, right: 20}}
+                <TouchableOpacity style={{position: 'absolute', top: 15, right: 15}}
                     onPress={() => {
-                        cmdlist = [];
-                        setCmds(Object.assign([], cmdlist));
+                        setCmds([]);
                     }}
                 >
-                    <Icon3 name='clear-all' size={15} color='blue' style={styles.icon}/>
+                    <Icon4 name='trash-o' size={24} color='red' style={styles.icon}/>
                 </TouchableOpacity>
             </View>
-            <Button 
-                color='#0394fc'
-                disabled={loading3 && firmware !== ''}
-                onPress = {() =>{
-                    _sendCommand('firmware');
-                }}
-                title = "Cập nhật firmware"/>
-            <View style={{ flexDirection: 'row', marginTop: 15 }}>
-                <Icon name='apple-keyboard-command' size={15} color='blue' style={styles.icon}/>
-                <Text style={styles.title}>Commands:</Text>
-            </View>
-            <View style={{flexDirection: 'row', flexWrap: 'wrap'}}>
-            {
-                _renderCommands(listcommand)
-            }
-            </View>
+            <View style={{flex: 1}}>
+                <View style={{ flexDirection: 'row', marginTop: 15 }}>
+                    <Icon name='apple-keyboard-command' size={15} color='blue' style={styles.icon}/>
+                    <Text style={styles.title}>Commands:</Text>
+                </View>
+                <View style={{flexDirection: 'row', flexWrap: 'wrap'}}>
+                {
+                    _renderCommands(listcommand)
+                }
+                <View style={styles.command2}>
+                    <TouchableOpacity
+                        disabled={loading3}
+                        onPress={() => {
+                            _gotoSettingCmd({name: 'cmd', value: ''}, 'create');
+                        }}
+                    >
+                        <Icon3 name='add-circle-outline' size={25} color='green' style={styles.icon3} />
+                    </TouchableOpacity>
+                </View>
+                </View>
+            </View>   
         </ScrollView>
     );
 }
@@ -507,7 +598,6 @@ const styles = StyleSheet.create({
         textAlign:"left"
     },
     wtf:{
-        flex:1,
         flexDirection:"row",
         justifyContent:"space-between",
         alignItems:"center"
@@ -533,6 +623,12 @@ const styles = StyleSheet.create({
         paddingTop: 2,
         paddingRight: 5,
     },
+    icon3: {
+        backgroundColor:"white",
+        paddingLeft:5,
+        paddingTop: 2,
+        paddingRight: 5,
+    },
     icon2: {
         paddingTop: 2,
         paddingRight: 5,
@@ -542,9 +638,9 @@ const styles = StyleSheet.create({
     },
     textAreaContainer: {
         flex: 1,
-        height: 200,
-        margin: 10,
-        padding: 10,
+        height: 350,
+        margin: 5,
+        padding: 5,
         borderColor: '#0394fc',
         borderRadius: 5,
         borderWidth: 1,
@@ -555,6 +651,13 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderRadius: 5,
         margin: 5
+    },
+    command2: {
+        padding: 2, 
+        borderColor: 'green', 
+        borderWidth: 1,
+        borderRadius: 5,
+        margin: 2
     }
 });
 

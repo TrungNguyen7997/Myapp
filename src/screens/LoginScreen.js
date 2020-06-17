@@ -51,7 +51,7 @@ const login = (user,pass,navigation) => {
                     tokenkey: response.data.data.Authcode
                 }
                 setIsLoading(false);
-                navigation.navigate('Bluetooth',{userdata: userdata, name: 'Bluetooth'});
+                navigation.navigate('Bluetooth',{userdata: userdata, name: 'Login'});
             }
             
         })
