@@ -16,7 +16,7 @@
     "axios": "^0.19.2",
     "md5": "^2.2.1",
     "react": "16.11.0",
-    "react-native": "0.62.0",
+    "react-native": "0.62.3",
     "react-native-bluetooth-escpos-printer": "0.0.5",
     "react-native-bluetooth-serial": "^1.0.0-rc1",
     "react-native-button": "^3.0.1",
